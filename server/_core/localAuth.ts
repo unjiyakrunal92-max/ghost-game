@@ -46,6 +46,8 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
+      const normalizedEmail = String(email).trim().toLowerCase();
+
       if (password.length < 6) {
         res.status(400).json({ error: "Password must be at least 6 characters" });
         return;
@@ -54,36 +56,35 @@ export function registerLocalAuthRoutes(app: Express) {
       const database = await db.getDb();
 
       // Check if user already exists
-      const existing = await database.collection("users").findOne({ email });
+      const existing = await database.collection("users").findOne({ email: normalizedEmail });
       if (existing) {
         res.status(409).json({ error: "A user with this email already exists" });
         return;
       }
 
-      const openId = `local_${createHash("sha256").update(email).digest("hex").slice(0, 16)}`;
+      const openId = `local_${createHash("sha256").update(normalizedEmail).digest("hex").slice(0, 16)}`;
       const hashedPassword = hashPassword(password);
 
-      // Store password hash in a separate collection for security
+      // Store password hash in user_credentials collection
       await database.collection("user_credentials").updateOne(
         { openId },
-        { $set: { openId, email, passwordHash: hashedPassword, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+        { $set: { openId, email: normalizedEmail, passwordHash: hashedPassword, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
         { upsert: true }
       );
-      await database.collection("user_credentials").createIndex({ openId: 1 }, { unique: true });
-      await database.collection("user_credentials").createIndex({ email: 1 }, { unique: true });
 
       // Create user in the main users collection
+      const displayName = name ? String(name).trim() : normalizedEmail.split("@")[0];
       await db.upsertUser({
         openId,
-        name: name || email.split("@")[0],
-        email,
+        name: displayName,
+        email: normalizedEmail,
         loginMethod: "email",
         lastSignedIn: new Date(),
       });
 
       // Create session token with 10hr expiration
       const sessionToken = await sdk.createSessionToken(openId, {
-        name: name || email.split("@")[0],
+        name: displayName,
         expiresInMs: TEN_HOURS_MS,
       });
 
@@ -94,7 +95,7 @@ export function registerLocalAuthRoutes(app: Express) {
       res.json({ success: true, user });
     } catch (error) {
       console.error("[Auth] Register failed:", error);
-      res.status(500).json({ error: "Registration failed. Please try again." });
+      res.status(500).json({ error: error instanceof Error ? error.message : "Registration failed. Please try again." });
     }
   });
 
@@ -111,8 +112,9 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
+      const normalizedEmail = String(email).trim().toLowerCase();
       const database = await db.getDb();
-      const credentials = await database.collection("user_credentials").findOne({ email });
+      const credentials = await database.collection("user_credentials").findOne({ email: normalizedEmail });
 
       if (!credentials) {
         res.status(401).json({ error: "Invalid email or password" });
@@ -125,6 +127,8 @@ export function registerLocalAuthRoutes(app: Express) {
       }
 
       const openId = credentials.openId as string;
+      const userRecord = await db.getUserByOpenId(openId);
+      const displayName = userRecord?.name || normalizedEmail.split("@")[0];
 
       // Update last sign-in
       await db.upsertUser({
@@ -134,7 +138,7 @@ export function registerLocalAuthRoutes(app: Express) {
 
       // Create session token with 10hr expiration
       const sessionToken = await sdk.createSessionToken(openId, {
-        name: credentials.email as string,
+        name: displayName,
         expiresInMs: TEN_HOURS_MS,
       });
 
@@ -145,7 +149,7 @@ export function registerLocalAuthRoutes(app: Express) {
       res.json({ success: true, user });
     } catch (error) {
       console.error("[Auth] Login failed:", error);
-      res.status(500).json({ error: "Login failed. Please try again." });
+      res.status(500).json({ error: error instanceof Error ? error.message : "Login failed. Please try again." });
     }
   });
 

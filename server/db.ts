@@ -21,7 +21,11 @@ export async function getDb(): Promise<Db> {
   if (!dbPromise) {
     const uri = ENV.mongoUri;
     if (!uri) throw new Error("MONGODB_URI must be set outside local development.");
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000, maxPoolSize: 10 });
+    const client = new MongoClient(uri, {
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
+      maxPoolSize: 10,
+    });
     mongoClient = client;
     dbPromise = client
       .connect()
@@ -29,6 +33,8 @@ export async function getDb(): Promise<Db> {
         const database = client.db(ENV.mongoDbName || "ghost_game_daa");
         await Promise.all([
           database.collection<StoredUser>(USER_COLLECTION).createIndex({ openId: 1 }, { unique: true }),
+          database.collection("user_credentials").createIndex({ openId: 1 }, { unique: true }),
+          database.collection("user_credentials").createIndex({ email: 1 }, { unique: true }),
           database.collection<StoredGameRun>(RUN_COLLECTION).createIndex({ userId: 1, createdAt: -1, id: -1 }),
           database.collection<StoredGameRun>(RUN_COLLECTION).createIndex({ userId: 1, result: 1, level: -1 }),
         ]);

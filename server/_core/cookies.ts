@@ -7,10 +7,16 @@ export function getSessionCookieOptions(req: Request): CookieOptions {
     req.protocol === "https" ||
     req.headers?.["x-forwarded-proto"] === "https";
 
+  const isCrossSite = Boolean(
+    req.headers.origin &&
+    req.headers.host &&
+    !req.headers.origin.includes(req.headers.host)
+  );
+
   return {
     httpOnly: true,
     secure: isSecure,
-    sameSite: isSecure ? "none" : "lax",
+    sameSite: isCrossSite && isSecure ? "none" : "lax",
     path: "/",
   };
 }
